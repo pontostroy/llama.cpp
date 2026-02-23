@@ -257,17 +257,23 @@ void quantize_row_q8_1_ref(const float * GGML_RESTRICT x, block_q8_1 * GGML_REST
     }
 }
 
-static inline int best_index_mxfp4(float x, float e) {
-    int best_index = 0;
-    float best_err = fabsf(kvalues_mxfp4[0]*e - x);
-    for (int i = 1; i < 16; i++) {
-        float err = fabsf(kvalues_mxfp4[i]*e - x);
-        if (err < best_err) {
-            best_index = i;
-            best_err = err;
-        }
-    }
-    return best_index;
+static inline uint8_t quantize_mxfp4_round_to_nearest_even(float x, float e) {
+    const uint8_t sign_bit = (x < 0.0f) << 3;
+    const float   ax = fabsf(x) / e;
+
+    // E2M1 magnitudes: 0, 0.5, 1, 1.5, 2, 3, 4, 6
+    // Midpoints use round-to-nearest-even (e.g. 0.75 -> 1.0, 1.75 -> 2.0).
+    uint8_t mag;
+    if      (ax <= 0.25f) mag = 0;
+    else if (ax <  0.75f) mag = 1;
+    else if (ax <= 1.25f) mag = 2;
+    else if (ax <  1.75f) mag = 3;
+    else if (ax <= 2.50f) mag = 4;
+    else if (ax <  3.50f) mag = 5;
+    else if (ax <= 5.00f) mag = 6;
+    else                  mag = 7;
+
+    return sign_bit | mag;
 }
 
 void quantize_row_mxfp4_ref(const float * GGML_RESTRICT x, block_mxfp4 * GGML_RESTRICT y, int64_t k) {
@@ -295,8 +301,8 @@ void quantize_row_mxfp4_ref(const float * GGML_RESTRICT x, block_mxfp4 * GGML_RE
         y[i].e = e;
 
         for (int j = 0; j < qk/2; ++j) {
-            const uint8_t x0 = best_index_mxfp4(x[i*qk + 0    + j], d);
-            const uint8_t x1 = best_index_mxfp4(x[i*qk + qk/2 + j], d);
+            const uint8_t x0 = quantize_mxfp4_round_to_nearest_even(x[i*qk + 0    + j], d);
+            const uint8_t x1 = quantize_mxfp4_round_to_nearest_even(x[i*qk + qk/2 + j], d);
 
             y[i].qs[j]  = x0;
             y[i].qs[j] |= x1 << 4;

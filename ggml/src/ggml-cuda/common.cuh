@@ -801,24 +801,21 @@ static __device__ __forceinline__ float ggml_cuda_e8m0_to_fp32(uint8_t x) {
 
 __device__ __forceinline__ uint8_t ggml_cuda_float_to_fp4_e2m1(float x, float e) {
     const uint8_t sign_bit = (x < 0.0f) << 3;
-    float         ax       = fabsf(x) * e;
+    const float   ax       = fabsf(x) * e;
 
-    // Positive LUT
-    static constexpr float pos_lut[8] = { 0.0f, 0.5f, 1.0f, 1.5f, 2.0f, 3.0f, 4.0f, 6.0f };
+    // E2M1 magnitudes: 0, 0.5, 1, 1.5, 2, 3, 4, 6.
+    // Midpoints use round-to-nearest-even to match hardware conversion.
+    uint8_t mag;
+    if      (ax <= 0.25f) mag = 0;
+    else if (ax <  0.75f) mag = 1;
+    else if (ax <= 1.25f) mag = 2;
+    else if (ax <  1.75f) mag = 3;
+    else if (ax <= 2.50f) mag = 4;
+    else if (ax <  3.50f) mag = 5;
+    else if (ax <= 5.00f) mag = 6;
+    else                  mag = 7;
 
-    int   best_i   = 0;
-    float best_err = fabsf(ax - pos_lut[0]);
-
-#pragma unroll
-    for (int i = 1; i < 8; ++i) {
-        const float err = fabsf(ax - pos_lut[i]);
-        if (err < best_err) {
-            best_err = err;
-            best_i   = i;
-        }
-    }
-
-    return static_cast<uint8_t>(best_i | sign_bit);
+    return static_cast<uint8_t>(mag | sign_bit);
 }
 
 // See https://gmplib.org/~tege/divcnst-pldi94.pdf figure 4.1.
